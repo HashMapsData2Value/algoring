@@ -162,14 +162,17 @@ func main() {
 	fmt.Println("Nonces", nonces)
 	fmt.Println()
 
-	values := make([]fr.Element, n+1)
+	values := make([]fr.Element, n)
 	values[0] = CreateRingLinkInit(msg, a, pk)
 	for i := 0; i < n; i++ {
 		values[i] = CreateRingLinkMain(msg, nonces[i], values[i], pks[i], keyImage)
 	}
 	fmt.Println("Values", values)
 	fmt.Println()
+
 	rPi := *a.Sub(&a, sk.Mul(&values[len(values)-1], &sk))
+	fmt.Println("rPi", rPi)
+	fmt.Println()
 
 	signature := make([]fr.Element, n+2)
 	signature[0] = values[len(values)-1]
@@ -190,7 +193,7 @@ func main() {
 
 	// Let's verify the signature
 
-	valuesPrime := make([]fr.Element, n+1)
+	valuesPrime := make([]fr.Element, n)
 	valuesPrime[0] = CreateRingLinkMain(msg, signature[1], signature[0], pk, keyImage)
 	for i := 0; i < n; i++ {
 		valuesPrime[i] = CreateRingLinkMain(msg, signature[i+2], valuesPrime[i], pks[i], keyImage)
