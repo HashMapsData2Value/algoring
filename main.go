@@ -50,16 +50,16 @@ func customHashG1ToFp(pk bn254.G1Affine) fp.Element {
 	// First hash pk to a field element
 	bytesPk := pk.Bytes()
 	hash := sha256.Sum256(bytesPk[:])
-	feVersionOfPk.SetBytes(hash[:])
+	hashInt := new(big.Int).SetBytes(hash[:])
+	intVal := new(big.Int).Mod(hashInt, fp.Modulus())
+	feVersionOfPk.SetBigInt(intVal)
 	return feVersionOfPk
 }
 
 func getKeyImage(sk fr.Element, pk bn254.G1Affine) bn254.G1Affine {
 	var keyImage bn254.G1Affine
 
-	feVersionOfPk := customHashG1ToFp(pk)
-
-	keyImage = bn254.MapToG1(feVersionOfPk)
+	keyImage = bn254.MapToG1(customHashG1ToFp(pk))
 	// The AVM has the MapToG1 function.
 	// Is it a trapdoor function though?
 	// Does it matter?
@@ -77,12 +77,10 @@ func CreateRingLinkInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element 
 	// msg is the message to be signed
 	// a is a random nonce
 	// pk is the public key of the signer
-
 	var ringLinkElement fr.Element
 
 	aBigInt := new(big.Int)
 	a.BigInt(aBigInt)
-
 	msgBytes := []byte(msg)
 
 	var middle bn254.G1Affine
@@ -92,8 +90,9 @@ func CreateRingLinkInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element 
 	last.ScalarMultiplication(&last, aBigInt)
 
 	hash := sha256.Sum256(append(append(msgBytes, middle.Marshal()...), last.Marshal()...))
-	ringLinkElement.SetBytes(hash[:])
-
+	hashInt := new(big.Int).SetBytes(hash[:])
+	intVal := new(big.Int).Mod(hashInt, fr.Modulus())
+	ringLinkElement.SetBigInt(intVal)
 	return ringLinkElement
 }
 
@@ -113,13 +112,15 @@ func CreateRingLinkMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affin
 	middle.Add(&middleLeft, &middleRight)
 
 	var last, lastLeft, lastRight bn254.G1Affine
-	lastRight.ScalarMultiplication(&keyImage, cBigInt)
 	lastLeftLeft := bn254.MapToG1(customHashG1ToFp(pk))
 	lastLeft.ScalarMultiplication(&lastLeftLeft, rBigInt)
+	lastRight.ScalarMultiplication(&keyImage, cBigInt)
+	last.Add(&lastLeft, &lastRight)
 
 	hash := sha256.Sum256(append(append(msgBytes, middle.Marshal()...), last.Marshal()...))
-	ringLinkElement.SetBytes(hash[:])
-
+	hashInt := new(big.Int).SetBytes(hash[:])
+	intVal := new(big.Int).Mod(hashInt, fr.Modulus())
+	ringLinkElement.SetBigInt(intVal)
 	return ringLinkElement
 }
 
@@ -129,13 +130,11 @@ func main() {
 	sk := generateFe()
 	pk := generateGe(sk)
 
-	fmt.Println("Secret Key is:", sk)
-	fmt.Println("Public Key is:", pk)
-	fmt.Println()
+	fmt.Println("SK and PK generated.")
 
 	// Prepare n public keys for our ring signature
 	// These would already be in the contract
-	n := 4 // Number of other participants
+	n := 1000 // Number of other participants
 
 	// Shift the ring
 	randInt, err := rand.Int(rand.Reader, big.NewInt(int64(n+1)))
@@ -148,7 +147,7 @@ func main() {
 	pi = 0
 
 	ring := make([]bn254.G1Affine, n+1)
-	for i := 0; i < n+1; i++ {
+	for i := 0; i < len(ring); i++ {
 		if i == pi {
 			ring[i] = pk
 			continue
@@ -156,14 +155,11 @@ func main() {
 		ring[i] = generateGe(generateFe())
 	}
 
-	fmt.Println(n, "public keys have been initialized.")
-	fmt.Println("Ring is")
-	fmt.Println(ring)
-	fmt.Println()
+	fmt.Println(n, "public keys have been initialized in addition to signer's keypair.")
 
 	// Generate the key image
 	keyImage := getKeyImage(sk, pk)
-	fmt.Println("keyImage is:", keyImage)
+	fmt.Println("keyImage generated.")
 	fmt.Println()
 
 	// Message
@@ -172,36 +168,42 @@ func main() {
 	// In the contract, we would include more info in this string
 	// Recipient, reward fee, reward recipient (in case 3rd party is paying for fees)
 	// Else? Key Image?
+	// The important part is to avoid replay attacks, or for anyone monitoring the mempool
+	// to be able to steal the ring signature and use it themselves
+
 	fmt.Println("Message is:", msg)
 	fmt.Println()
-	nonces := make([]fr.Element, n+1)
-	for i := 0; i < n+1; i++ {
+
+	a := generateFe()
+
+	nonces := make([]fr.Element, n)
+	for i := 0; i < len(nonces); i++ {
 		nonces[i] = generateFe()
 	}
-	fmt.Println("Nonces", nonces)
-	fmt.Println()
+	fmt.Println("Generated nonces: ", len(nonces))
 
-	values := make([]fr.Element, n)
-	values[pi] = CreateRingLinkInit(msg, nonces[pi], ring[pi])
+	values := make([]fr.Element, n+1)
+	values[0] = CreateRingLinkInit(msg, a, ring[0]) //starts at index 0 but corresponds to c1
 	for i := 0; i < n; i++ {
-		values[i] = CreateRingLinkMain(msg, nonces[i+1], values[i], ring[i+1], keyImage)
+		values[i+1] = CreateRingLinkMain(msg, nonces[i], values[i], ring[i+1], keyImage)
 	}
 
-	fmt.Println("Values", values)
-	fmt.Println()
+	fmt.Println("Generated values: ", len(values))
 
 	// Calculate r_pi, which ensures privacy.
 	// It's not possible to distinguish r_pi from other nonce values
 	// or tell that it is connected to the sk
-	rPi := *nonces[pi].Sub(&nonces[pi], sk.Mul(&values[len(values)-1], &sk))
-	nonces[pi] = rPi
-	fmt.Println("rPi", rPi)
-	fmt.Println()
 
-	signature := make([]fr.Element, n+1)
-	initializer := values[len(values)-1]
-	for i := 0; i < n+1; i++ {
-		signature[i] = nonces[i]
+	var rpi, mult fr.Element
+
+	mult.Mul(&sk, &values[len(values)-1])
+	rpi.Sub(&a, &mult)
+
+	sig := make([]fr.Element, n+2)
+	sig[0] = values[len(values)-1]
+	sig[1] = rpi
+	for i := 0; i < n; i++ {
+		sig[i+2] = nonces[i]
 	}
 
 	// Signature contains c_pi, r_pi, r_1, r_2, ..., r_n
@@ -215,45 +217,13 @@ func main() {
 
 	// Let's verify the signature
 
-	valuesPrime := make([]fr.Element, n)
-	valuesPrime[0] = CreateRingLinkMain(msg, signature[0], initializer, ring[0], keyImage)
+	valuesPrime := make([]fr.Element, n+1)
+	valuesPrime[0] = CreateRingLinkMain(msg, sig[1], sig[0], ring[0], keyImage)
 	for i := 0; i < n; i++ {
-		valuesPrime[i] = CreateRingLinkMain(msg, signature[i+1], valuesPrime[i], ring[i+1], keyImage)
+		valuesPrime[i+1] = CreateRingLinkMain(msg, sig[i+2], valuesPrime[i], ring[i+1], keyImage)
 	}
 
-	fmt.Println("ValuesPrime", valuesPrime)
-	fmt.Println()
-
 	fmt.Println("Finally... Let's check and see if they're equal:")
-	fmt.Println(initializer, valuesPrime[len(valuesPrime)-1])
+	fmt.Println(sig[0], valuesPrime[len(valuesPrime)-1])
 
 }
-
-// func test1() {
-
-// 	signature := [10]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-// 	ring := [9]int{1, 2, 3, 4, 5, 6, 7, 8, 9}
-// 	shiftFactor, _ := rand.Int(rand.Reader, big.NewInt(int64(len(signature))))
-// 	shiftFactor = big.NewInt(int64(1))
-// 	shiftedSignature := make([]int, len(signature))
-// 	shiftedRing := make([]int, len(ring))
-
-// 	for i := 1; i < len(signature); i++ {
-// 		shiftedSignature[i] = signature[(i+int(shiftFactor.Int64()))%(len(signature)-1)+1]
-
-// 	}
-// 	for i := 0; i < len(ring); i++ {
-// 		shiftedRing[i] = ring[(i+int(shiftFactor.Int64())+1)%(len(ring))]
-// 	}
-
-// 	fmt.Println()
-// 	fmt.Println()
-// 	fmt.Println("shiftFactor", shiftFactor)
-// 	fmt.Println()
-// 	fmt.Println("oSignature", signature)
-// 	fmt.Println("sSignature", shiftedSignature)
-// 	fmt.Println()
-// 	fmt.Println("oRing", ring)
-// 	fmt.Println("sRing", shiftedRing)
-// 	fmt.Println()
-// }
