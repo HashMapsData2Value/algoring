@@ -9,6 +9,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 )
 
+// TODO: SHIFT THE SIGNER PK AND EVERYTHING AROUND RANDOMLY!
+
 func keyGen() (fr.Element, bn254.G1Affine) {
 	sk := GenerateFe()
 	pk := GenerateGe(sk)
@@ -130,9 +132,5 @@ func main() {
 
 	check := verSig(msg, sig, ring, keyImage)
 	fmt.Println("Signature verified:", check)
-
-	// the signature and ring should have their indices translated randomly but in this example they're indexed at 0
-
-	// Let's verify the signature
 
 }
