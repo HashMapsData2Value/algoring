@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/pkg/errors"
 )
 
 /*
@@ -31,6 +33,28 @@ func GenerateGe(fe fr.Element) bn254.G1Affine {
 	fe.BigInt(bigInt)
 	ge.ScalarMultiplicationBase(bigInt)
 	return ge
+}
+
+func GetSignerIndex(ring []bn254.G1Affine, pk bn254.G1Affine) (int, error) {
+	for i, v := range ring {
+		if v.Equal(&pk) {
+			return i, nil
+		}
+	}
+	return -1, errors.New("Signer not found in ring.")
+}
+
+func GetRandomShiftFactor(n int) int {
+	randInt, err := rand.Int(rand.Reader, big.NewInt(int64(n+1)))
+	if err != nil {
+		panic(err)
+	}
+
+	piRand := big.NewInt(randInt.Int64()) // pi is the index of the signer in the ring
+	pi := int(piRand.Int64())             // hardcode to 0 for now
+	pi = 0
+
+	return pi
 }
 
 func customHashG1ToFp(pk bn254.G1Affine) fp.Element {

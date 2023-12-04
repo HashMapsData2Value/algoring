@@ -1,9 +1,7 @@
 package main
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
@@ -11,7 +9,7 @@ import (
 
 // TODO: SHIFT THE SIGNER PK AND EVERYTHING AROUND RANDOMLY!
 
-func keyGen() (fr.Element, bn254.G1Affine) {
+func KeyGen() (fr.Element, bn254.G1Affine) {
 	sk := GenerateFe()
 	pk := GenerateGe(sk)
 	return sk, pk
@@ -29,9 +27,16 @@ func createRing(n int, signerIdx int, signerPk bn254.G1Affine) []bn254.G1Affine 
 	return ring
 }
 
-func genSig(msg string, sk fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) []fr.Element {
+func Sign(msg string, sk fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) []fr.Element {
+	pi, err := GetSignerIndex(ring, GenerateGe(sk))
+	if err != nil {
+		panic(err)
+	}
+
 	n := len(ring) - 1
 	a := GenerateFe()
+
+	fmt.Println("Signer index:", pi)
 
 	nonces := make([]fr.Element, n)
 	for i := 0; i < len(nonces); i++ {
@@ -66,7 +71,7 @@ func genSig(msg string, sk fr.Element, ring []bn254.G1Affine, keyImage bn254.G1A
 	return sig
 }
 
-func verSig(msg string, sig []fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) bool {
+func Verify(msg string, sig []fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) bool {
 	n := len(ring) - 1
 	valuesPrime := make([]fr.Element, n+1)
 	valuesPrime[0] = CreateRingLinkMain(msg, sig[1], sig[0], ring[0], keyImage)
@@ -76,23 +81,10 @@ func verSig(msg string, sig []fr.Element, ring []bn254.G1Affine, keyImage bn254.
 	return valuesPrime[len(valuesPrime)-1] == sig[0]
 }
 
-func getRandomShiftFactor(n int) int {
-	randInt, err := rand.Int(rand.Reader, big.NewInt(int64(n+1)))
-	if err != nil {
-		panic(err)
-	}
-
-	piRand := big.NewInt(randInt.Int64()) // pi is the index of the signer in the ring
-	pi := int(piRand.Int64())             // hardcode to 0 for now
-	pi = 0
-
-	return pi
-}
-
 func main() {
 	fmt.Println("Ring Signatures!")
 	// Generate a secret key and public key
-	sk, pk := keyGen()
+	sk, pk := KeyGen()
 
 	fmt.Println("SK and PK generated.")
 
@@ -100,11 +92,11 @@ func main() {
 	// These would already be in the contract
 
 	n := 1000                     // Number of other participants
-	pi := getRandomShiftFactor(n) // signed index
+	pi := GetRandomShiftFactor(n) // signed index
 
 	ring := createRing(n, pi, pk)
 
-	fmt.Println(n, "public keys have been initialized in additsion to signer's keypair.")
+	fmt.Println(n, "public keys have been initialized in addition to signer's keypair.")
 
 	// Generate the key image
 	keyImage := GetKeyImage(sk, pk)
@@ -123,14 +115,14 @@ func main() {
 	fmt.Println("Message is:", msg)
 	fmt.Println()
 
-	sig := genSig(msg, sk, ring, keyImage)
+	sig := Sign(msg, sk, ring, keyImage)
 	// Signature contains c_pi, r_1, r_2, ..., r_n (hopefully r_pi shuffled somewhere there too)
 	// Importantly we do NOT include a! It is a secret nonce
 	// Alongside the signature we should also include the key image,
 	// a ring of public keys (including our own)
 	// and of course the message we are signing!
 
-	check := verSig(msg, sig, ring, keyImage)
+	check := Verify(msg, sig, ring, keyImage)
 	fmt.Println("Signature verified:", check)
 
 }
