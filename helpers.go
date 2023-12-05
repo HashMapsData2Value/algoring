@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"fmt"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
@@ -53,8 +52,6 @@ func GetRandomShiftFactor(n int) int {
 
 	piRand := big.NewInt(randInt.Int64()) // pi is the index of the signer in the ring
 	pi := int(piRand.Int64())             // hardcode to 0 for now
-	pi = 1
-	fmt.Println("Signer index: ", pi)
 	return pi
 }
 
