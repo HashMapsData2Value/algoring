@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254"
@@ -45,15 +46,15 @@ func GetSignerIndex(ring []bn254.G1Affine, pk bn254.G1Affine) (int, error) {
 }
 
 func GetRandomShiftFactor(n int) int {
-	randInt, err := rand.Int(rand.Reader, big.NewInt(int64(n+1)))
+	randInt, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
 	if err != nil {
 		panic(err)
 	}
 
 	piRand := big.NewInt(randInt.Int64()) // pi is the index of the signer in the ring
 	pi := int(piRand.Int64())             // hardcode to 0 for now
-	pi = 0
-
+	pi = 1
+	fmt.Println("Signer index: ", pi)
 	return pi
 }
 
@@ -93,7 +94,7 @@ func GetKeyImage(sk fr.Element, pk bn254.G1Affine) bn254.G1Affine {
 	return keyImage
 }
 
-func CreateRingLinkInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element {
+func ChallengeInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element {
 	// Initializing ring link value
 	// Creates the first ring link
 	// msg is the message to be signed
@@ -118,7 +119,7 @@ func CreateRingLinkInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element 
 	return ringLinkElement
 }
 
-func CreateRingLinkMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affine, keyImage bn254.G1Affine) fr.Element {
+func ChallengeMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affine, keyImage bn254.G1Affine) fr.Element {
 	var ringLinkElement fr.Element
 
 	rBigInt := new(big.Int)
