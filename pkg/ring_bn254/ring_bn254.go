@@ -1,4 +1,4 @@
-package main
+package ring_bn254
 
 import (
 	"crypto/rand"
@@ -55,7 +55,7 @@ func GetRandomShiftFactor(n int) int {
 	return pi
 }
 
-func customHashG1ToFp(pk bn254.G1Affine) fp.Element {
+func CustomHashG1ToFp(pk bn254.G1Affine) fp.Element {
 	// In ring signatures we need to hash public keys (G1 elements)
 	// to the curve. But the AVM only has a MapToG1 function,
 	// which maps field elements to the curve.
@@ -79,7 +79,7 @@ func customHashG1ToFp(pk bn254.G1Affine) fp.Element {
 func GetKeyImage(sk fr.Element, pk bn254.G1Affine) bn254.G1Affine {
 	var keyImage bn254.G1Affine
 
-	keyImage = bn254.MapToG1(customHashG1ToFp(pk))
+	keyImage = bn254.MapToG1(CustomHashG1ToFp(pk))
 	// The AVM has the MapToG1 function.
 	// Is it a trapdoor function though?
 	// Does it matter?
@@ -106,7 +106,7 @@ func ChallengeInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element {
 	var middle bn254.G1Affine
 	middle.ScalarMultiplicationBase(aBigInt)
 
-	last := bn254.MapToG1(customHashG1ToFp(pk))
+	last := bn254.MapToG1(CustomHashG1ToFp(pk))
 	last.ScalarMultiplication(&last, aBigInt)
 
 	hash := sha256.Sum256(append(append(msgBytes, middle.Marshal()...), last.Marshal()...))
@@ -132,7 +132,7 @@ func ChallengeMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affine, ke
 	middle.Add(&middleLeft, &middleRight)
 
 	var last, lastLeft, lastRight bn254.G1Affine
-	lastLeftLeft := bn254.MapToG1(customHashG1ToFp(pk))
+	lastLeftLeft := bn254.MapToG1(CustomHashG1ToFp(pk))
 	lastLeft.ScalarMultiplication(&lastLeftLeft, rBigInt)
 	lastRight.ScalarMultiplication(&keyImage, cBigInt)
 	last.Add(&lastLeft, &lastRight)
@@ -142,4 +142,87 @@ func ChallengeMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affine, ke
 	intVal := new(big.Int).Mod(hashInt, fr.Modulus())
 	ringLinkElement.SetBigInt(intVal)
 	return ringLinkElement
+}
+
+func KeyGen() (fr.Element, bn254.G1Affine) {
+	sk := GenerateFe()
+	pk := GenerateGe(sk)
+	return sk, pk
+}
+
+func createRing(n int, signerIdx int, signerPk bn254.G1Affine) []bn254.G1Affine {
+	ring := make([]bn254.G1Affine, n)
+	for i := 0; i < len(ring); i++ {
+		if i == signerIdx {
+			ring[i] = signerPk
+			continue
+		}
+		ring[i] = GenerateGe(GenerateFe())
+	}
+	return ring
+}
+
+func Sign(msg string, sk fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) []fr.Element {
+	pi, err := GetSignerIndex(ring, GenerateGe(sk))
+	if err != nil {
+		panic(err)
+	}
+
+	n := len(ring)
+
+	nonces := make([]fr.Element, n)
+	for i := 0; i < len(nonces); i++ {
+		nonces[i] = GenerateFe()
+	}
+
+	values := make([]fr.Element, n)
+
+	for i := 0; i < n; i++ {
+		j := (i + pi) % n
+		k := (i + pi + 1) % n
+
+		if j == pi {
+			values[k] = ChallengeInit(msg, nonces[j], ring[j])
+			continue
+		}
+
+		values[k] = ChallengeMain(msg, nonces[j], values[j], ring[j], keyImage)
+	}
+
+	// Calculate r_pi, which ensures privacy.
+	// It's not possible to distinguish r_pi from other nonce values
+	// or tell that it is connected to the sk
+
+	var rpi, mult fr.Element
+
+	mult.Mul(&sk, &values[pi])
+	rpi.Sub(&nonces[pi], &mult) // r_pi = a - sk * c_pi
+	nonces[pi] = rpi
+
+	sig := make([]fr.Element, n+1)
+
+	sig[0] = values[0]
+	for i := 0; i < n; i++ {
+		sig[i+1] = nonces[i]
+	}
+
+	// run the Verify function to check that the signature is valid
+	if !Verify(msg, sig, ring, keyImage) {
+		panic("Signature is invalid!")
+	}
+
+	return sig
+}
+
+func Verify(msg string, sig []fr.Element, ring []bn254.G1Affine, keyImage bn254.G1Affine) bool {
+	n := len(ring)
+	valuesPrime := make([]fr.Element, n)
+
+	valuesPrime[0] = sig[0]
+	for i := 0; i < n-1; i++ {
+		valuesPrime[i+1] = ChallengeMain(msg, sig[i+1], valuesPrime[i], ring[i], keyImage)
+	}
+	valuesPrime[0] = ChallengeMain(msg, sig[n], valuesPrime[n-1], ring[n-1], keyImage)
+
+	return valuesPrime[0] == sig[0]
 }
