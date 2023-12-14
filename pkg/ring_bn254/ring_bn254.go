@@ -55,7 +55,7 @@ func GetRandomShiftFactor(n int) int {
 	return pi
 }
 
-func CustomHashG1ToFp(pk bn254.G1Affine) fp.Element {
+func HashPointToPoint(pk bn254.G1Affine) bn254.G1Affine {
 	// In ring signatures we need to hash public keys (G1 elements)
 	// to the curve. But the AVM only has a MapToG1 function,
 	// which maps field elements to the curve.
@@ -68,18 +68,17 @@ func CustomHashG1ToFp(pk bn254.G1Affine) fp.Element {
 
 	var feVersionOfPk fp.Element
 	// First hash pk to a field element
-	bytesPk := pk.Bytes()
-	hash := sha256.Sum256(bytesPk[:])
+	hash := sha256.Sum256(append(pk.X.Marshal(), pk.Y.Marshal()...))
 	hashInt := new(big.Int).SetBytes(hash[:])
 	intVal := new(big.Int).Mod(hashInt, fp.Modulus())
 	feVersionOfPk.SetBigInt(intVal)
-	return feVersionOfPk
+	return bn254.MapToG1(feVersionOfPk)
 }
 
 func GetKeyImage(sk fr.Element, pk bn254.G1Affine) bn254.G1Affine {
 	var keyImage bn254.G1Affine
 
-	keyImage = bn254.MapToG1(CustomHashG1ToFp(pk))
+	keyImage = HashPointToPoint(pk)
 	// The AVM has the MapToG1 function.
 	// Is it a trapdoor function though?
 	// Does it matter?
@@ -106,7 +105,7 @@ func ChallengeInit(msg string, a fr.Element, pk bn254.G1Affine) fr.Element {
 	var middle bn254.G1Affine
 	middle.ScalarMultiplicationBase(aBigInt)
 
-	last := bn254.MapToG1(CustomHashG1ToFp(pk))
+	last := HashPointToPoint(pk)
 	last.ScalarMultiplication(&last, aBigInt)
 
 	hash := sha256.Sum256(append(append(msgBytes, middle.Marshal()...), last.Marshal()...))
@@ -132,7 +131,7 @@ func ChallengeMain(msg string, r fr.Element, c fr.Element, pk bn254.G1Affine, ke
 	middle.Add(&middleLeft, &middleRight)
 
 	var last, lastLeft, lastRight bn254.G1Affine
-	lastLeftLeft := bn254.MapToG1(CustomHashG1ToFp(pk))
+	lastLeftLeft := HashPointToPoint(pk)
 	lastLeft.ScalarMultiplication(&lastLeftLeft, rBigInt)
 	lastRight.ScalarMultiplication(&keyImage, cBigInt)
 	last.Add(&lastLeft, &lastRight)

@@ -26,6 +26,7 @@ func init() {
 	sk, pk := ring_bn254.KeyGen()
 	fmt.Println("Secret key:", sk)
 	fmt.Println("Public key:", pk)
+
 	// Here you will define your flags and configuration settings.
 
 	// Cobra supports Persistent Flags which will work for this command
